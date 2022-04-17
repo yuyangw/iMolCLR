@@ -1,0 +1,23 @@
+batch_size: 32                  # batch size
+epochs: 100                     # total number of epochs
+eval_every_n_epochs: 1          # validation frequency
+fine_tune_from: pretrained      # directory of pre-trained model
+log_every_n_steps: 50           # print training log frequency
+gpu: cuda:0                     # training GPU
+task_name: BBBP                 # name of fine-tuning benchmark, inlcuding
+                                # classifications: BBBP/BACE/ClinTox/Tox21/HIV/SIDER/MUV
+                                # regressions: FreeSolv/ESOL/Lipo/qm7/qm8
+
+optim:
+  lr: 0.0005                    # initial learning rate for the prediction head
+  weight_decay: 0.000001        # weight decay of Adam
+  base_ratio: 0.4               # ratio of learning rate for the base GNN encoder
+
+model:                          # notice that other 'model' variables are defined from the config of pretrained model
+  drop_ratio: 0.3               # dropout ratio
+  pool: mean                    # readout pooling (i.e., mean/max/add)
+
+dataset:
+  num_workers: 4                # dataloader number of workers
+  valid_size: 0.1               # ratio of validation data
+  test_size: 0.1                # ratio of test data

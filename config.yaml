@@ -1,0 +1,31 @@
+batch_size: 512                           # batch size
+world_size: 3                             # total number of GPUs
+backend: nccl                             # backends of PyTorch
+epochs: 50                                # total number of epochs
+warmup: 10                                # warm-up epochs
+
+eval_every_n_epochs: 1                    # validation frequency
+resume_from: None                         # resume training
+log_every_n_steps: 200                    # print training log frequency
+
+optim:
+  lr: 0.0005                              # initial learning rate for Adam optimizer
+  weight_decay: 0.00001                   # weight decay for Adam for Adam optimizer
+
+model: 
+  num_layer: 5                            # number of graph conv layers
+  emb_dim: 300                            # embedding dimension in graph conv layers
+  feat_dim: 512                           # output feature dimention
+  dropout: 0                              # dropout ratio
+  pool: mean                              # readout pooling (i.e., mean/max/add)
+
+dataset:
+  num_workers: 12                         # dataloader number of workers
+  valid_size: 0.05                        # ratio of validation data
+  data_path: data/pubchem-10m-clean.txt   # path of pre-training data
+
+loss:
+  temperature: 0.1                        # temperature of (weighted) NT-Xent loss
+  use_cosine_similarity: True             # whether to use cosine similarity in (weighted) NT-Xent loss (i.e. True/False)
+  lambda_1: 0.5                           # $\lambda_1$ to control faulty negative mitigation 
+  lambda_2: 0.5                           # $\lambda_2$ to control fragment contrast

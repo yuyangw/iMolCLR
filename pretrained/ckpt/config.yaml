@@ -1,0 +1,30 @@
+batch_size: 512
+world_size: 3
+backend: nccl
+epochs: 50
+eval_every_n_epochs: 1
+resume_from: None
+log_every_n_steps: 200
+warmup: 10
+sub_coeff: 0.5
+
+optim:
+  type: Adam
+  lr: 0.0005
+  weight_decay: 0.00001
+
+model: 
+  num_layer: 5
+  emb_dim: 300
+  feat_dim: 512
+  dropout: 0
+  pool: mean
+
+dataset:
+  num_workers: 24
+  valid_size: 0
+  data_path: data/pubchem-10m-clean.txt
+
+loss:
+  temperature: 0.1
+  use_cosine_similarity: True
