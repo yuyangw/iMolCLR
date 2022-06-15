@@ -1,6 +1,36 @@
 ## Improving Molecular Contrastive Learning via Faulty Negative Mitigation and Decomposed Fragment Contrast ## 
 
-This is the offical implementation of <strong><em>iMolCLR</em></strong>: ["Improving Molecular Contrastive Learning via Faulty Negative Mitigation and Decomposed Fragment Contrast"](https://arxiv.org/abs/2202.09346). 
+#### Journal of Chemical Information and Modeling [[Paper]](https://pubs.acs.org/doi/full/10.1021/acs.jcim.2c00495) [[arXiv]](https://arxiv.org/abs/2202.09346) [[PDF]](https://arxiv.org/pdf/2202.09346.pdf) </br> 
+[Yuyang Wang](https://yuyangw.github.io/), [Rishikesh Magar](https://www.linkedin.com/in/rishikesh-magar), Chen Liang, [Amir Barati Farimani](https://www.meche.engineering.cmu.edu/directory/bios/barati-farimani-amir.html) </br> Carnegie Mellon University </br>
+
+<img src="figs/pipeline.png" width="500">
+
+This is the offical implementation of <strong><em>iMolCLR</em></strong>: ["Improving Molecular Contrastive Learning via Faulty Negative Mitigation and Decomposed Fragment Contrast"](https://pubs.acs.org/doi/full/10.1021/acs.jcim.2c00495). 
+If you find our work useful in your research, please cite:
+
+```
+@article{wang2022improving,
+  title={Improving Molecular Contrastive Learning via Faulty Negative Mitigation and Decomposed Fragment Contrast},
+  author={Wang, Yuyang and Magar, Rishikesh and Liang, Chen and Farimani, Amir Barati},
+  journal={Journal of Chemical Information and Modeling},
+  volume={59},
+  number={8},
+  pages={3370--3388},
+  year={2022},
+  publisher={ACS Publications},
+  doi={10.1021/acs.jcim.2c00495}
+}
+
+@article{wang2022molclr,
+  title={Molecular contrastive learning of representations via graph neural networks},
+  author={Wang, Yuyang and Wang, Jianren and Cao, Zhonglin and Barati Farimani, Amir},
+  journal={Nature Machine Intelligence},
+  pages={1--9},
+  year={2022},
+  publisher={Nature Publishing Group},
+  doi={10.1038/s42256-022-00447-x}
+}
+```
 
 ## Getting Started
 
