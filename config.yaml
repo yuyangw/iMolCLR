@@ -2,7 +2,6 @@ gpu: cuda:0
 batch_size: 16                           # batch size
 epochs: 50                                # total number of epochs
 warmup: 10                                # warm-up epochs
-sub_coeff: 0.5 
 
 eval_every_n_epochs: 1                    # validation frequency
 resume_from: None                         # resume training
