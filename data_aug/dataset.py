@@ -2,8 +2,8 @@ import os
 import csv
 import math
 import time
+import signal
 import random
-import networkx as nx
 import numpy as np
 from copy import deepcopy
 
@@ -16,11 +16,15 @@ import torchvision.transforms as transforms
 from torch_scatter import scatter
 from torch_geometric.data import Data, Batch
 
+import networkx as nx
+from networkx.algorithms.components import node_connected_component
+
 import rdkit
 from rdkit import Chem
 from rdkit.Chem.rdchem import HybridizationType
 from rdkit.Chem.rdchem import BondType as BT
 from rdkit.Chem import AllChem
+from rdkit.Chem.BRICS import BRICSDecompose, FindBRICSBonds, BreakBRICSBonds
 
 
 ATOM_LIST = list(range(1,119))
@@ -43,6 +47,23 @@ BONDDIR_LIST = [
 ]
 
 
+class TimeoutError(Exception):
+    pass
+
+
+class timeout:
+    def __init__(self, seconds=1, error_message='Timeout'):
+        self.seconds = seconds
+        self.error_message = error_message
+    def handle_timeout(self, signum, frame):
+        raise TimeoutError(self.error_message)
+    def __enter__(self):
+        signal.signal(signal.SIGALRM, self.handle_timeout)
+        signal.alarm(self.seconds)
+    def __exit__(self, type, value, traceback):
+        signal.alarm(0)
+
+
 def read_smiles(data_path):
     smiles_data = []
     with open(data_path) as csv_file:
@@ -50,31 +71,75 @@ def read_smiles(data_path):
         for i, row in enumerate(csv_reader):
             smiles = row[-1]
             smiles_data.append(smiles)
-            # mol = Chem.MolFromSmiles(smiles)
-            # if mol != None:
-            #     smiles_data.append(smiles)
     return smiles_data
 
 
-def removeSubgraph(Graph, center, percent=0.2):
-    assert percent <= 1
-    G = Graph.copy()
-    num = int(np.floor(len(G.nodes)*percent))
-    removed = []
-    temp = [center]
+def get_fragment_indices(mol):
+    bonds = mol.GetBonds()
+    edges = []
+    for bond in bonds:
+        edges.append([bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()])
+    molGraph = nx.Graph(edges)
+
+    BRICS_bonds = list(FindBRICSBonds(mol))
+    break_bonds = [b[0] for b in BRICS_bonds]
+    break_atoms = [b[0][0] for b in BRICS_bonds] + [b[0][1] for b in BRICS_bonds]
+    molGraph.remove_edges_from(break_bonds)
+
+    indices = []
+    for atom in break_atoms:
+        n = node_connected_component(molGraph, atom)
+        if len(n) > 3 and n not in indices:
+            indices.append(n)
+    indices = set(map(tuple, indices))
+    return indices
+
+
+def get_fragments(mol):
+    try:
+        with timeout(seconds=2):
+
+            ref_indices = get_fragment_indices(mol)
+
+            frags = list(BRICSDecompose(mol, returnMols=True))
+            mol2 = BreakBRICSBonds(mol)
+
+            extra_indices = []
+            for i, atom in enumerate(mol2.GetAtoms()):
+                if atom.GetAtomicNum() == 0:
+                    extra_indices.append(i)
+            extra_indices = set(extra_indices)
+
+            frag_mols = []
+            frag_indices = []
+            for frag in frags:
+                indices = mol2.GetSubstructMatches(frag)
+                # if len(indices) >= 1:
+                #     idx = indices[0]
+                #     idx = set(idx) - extra_indices
+                #     if len(idx) > 3:
+                #         frag_mols.append(frag)
+                #         frag_indices.append(idx)
+                if len(indices) == 1:
+                    idx = indices[0]
+                    idx = set(idx) - extra_indices
+                    if len(idx) > 3:
+                        frag_mols.append(frag)
+                        frag_indices.append(idx)
+                else:
+                    for idx in indices:
+                        idx = set(idx) - extra_indices
+                        if len(idx) > 3:
+                            for ref_idx in ref_indices:
+                                if (tuple(idx) == ref_idx) and (idx not in frag_indices):
+                                    frag_mols.append(frag)
+                                    frag_indices.append(idx)
+
+            return frag_mols, frag_indices
     
-    while len(removed) < num:
-        neighbors = []
-        for n in temp:
-            neighbors.extend([i for i in G.neighbors(n) if i not in temp])      
-        for n in temp:
-            if len(removed) < num:
-                G.remove_node(n)
-                removed.append(n)
-            else:
-                break
-        temp = list(set(neighbors))
-    return G, removed
+    except:
+        print('timeout!')
+        return [], [set()]
 
 
 class MoleculeDataset(Dataset):
@@ -84,7 +149,7 @@ class MoleculeDataset(Dataset):
 
     def __getitem__(self, index):
         mol = Chem.MolFromSmiles(self.smiles_data[index])
-        mol = Chem.AddHs(mol)
+        # mol = Chem.AddHs(mol)
 
         N = mol.GetNumAtoms()
         M = mol.GetNumBonds()
@@ -92,23 +157,8 @@ class MoleculeDataset(Dataset):
         type_idx = []
         chirality_idx = []
         atomic_number = []
-        atoms = mol.GetAtoms()
-        bonds = mol.GetBonds()
-        # Sample 2 different centers to start for i and j
-        start_i, start_j = random.sample(list(range(N)), 2)
 
-        # Construct the original molecular graph from edges (bonds)
-        edges = []
-        for bond in bonds:
-            edges.append([bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()])
-        molGraph = nx.Graph(edges)
-        
-        # Get the graph for i and j after removing subgraphs
-        percent_i, percent_j = 0.25, 0.25
-        G_i, removed_i = removeSubgraph(molGraph, start_i, percent_i)
-        G_j, removed_j = removeSubgraph(molGraph, start_j, percent_j)
-        
-        for atom in atoms:
+        for atom in mol.GetAtoms():
             type_idx.append(ATOM_LIST.index(atom.GetAtomicNum()))
             chirality_idx.append(CHIRALITY_LIST.index(atom.GetChiralTag()))
             atomic_number.append(atom.GetAtomicNum())
@@ -116,59 +166,127 @@ class MoleculeDataset(Dataset):
         x1 = torch.tensor(type_idx, dtype=torch.long).view(-1,1)
         x2 = torch.tensor(chirality_idx, dtype=torch.long).view(-1,1)
         x = torch.cat([x1, x2], dim=-1)
-        # x shape (N, 2) [type, chirality]
 
-        # Mask the atoms in the removed list
-        x_i = deepcopy(x)
-        for atom_idx in removed_i:
-            # Change atom type to 118, and chirality to 0
-            x_i[atom_idx,:] = torch.tensor([len(ATOM_LIST), 0])
-        x_j = deepcopy(x)
-        for atom_idx in removed_j:
-            # Change atom type to 118, and chirality to 0
-            x_j[atom_idx,:] = torch.tensor([len(ATOM_LIST), 0])
-
-        # Only consider bond still exist after removing subgraph
-        row_i, col_i, row_j, col_j = [], [], [], []
-        edge_feat_i, edge_feat_j = [], []
-        G_i_edges = list(G_i.edges)
-        G_j_edges = list(G_j.edges)
+        row, col, edge_feat = [], [], []
         for bond in mol.GetBonds():
             start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-            feature = [
+            row += [start, end]
+            col += [end, start]
+            edge_feat.append([
                 BOND_LIST.index(bond.GetBondType()),
                 BONDDIR_LIST.index(bond.GetBondDir())
-            ]
-            if (start, end) in G_i_edges:
-                row_i += [start, end]
-                col_i += [end, start]
-                edge_feat_i.append(feature)
-                edge_feat_i.append(feature)
-            if (start, end) in G_j_edges:
-                row_j += [start, end]
-                col_j += [end, start]
-                edge_feat_j.append(feature)
-                edge_feat_j.append(feature)
+            ])
+            edge_feat.append([
+                BOND_LIST.index(bond.GetBondType()),
+                BONDDIR_LIST.index(bond.GetBondDir())
+            ])
 
-        edge_index_i = torch.tensor([row_i, col_i], dtype=torch.long)
-        edge_attr_i = torch.tensor(np.array(edge_feat_i), dtype=torch.long)
-        edge_index_j = torch.tensor([row_j, col_j], dtype=torch.long)
-        edge_attr_j = torch.tensor(np.array(edge_feat_j), dtype=torch.long)
-        
+        edge_index = torch.tensor([row, col], dtype=torch.long)
+        edge_attr = torch.tensor(np.array(edge_feat), dtype=torch.long)
+
+        # random mask a subgraph of the molecule
+        num_mask_nodes = max([1, math.floor(0.25*N)])
+        num_mask_edges = max([0, math.floor(0.25*M)])
+        mask_nodes_i = random.sample(list(range(N)), num_mask_nodes)
+        mask_nodes_j = random.sample(list(range(N)), num_mask_nodes)
+        mask_edges_i_single = random.sample(list(range(M)), num_mask_edges)
+        mask_edges_j_single = random.sample(list(range(M)), num_mask_edges)
+        mask_edges_i = [2*i for i in mask_edges_i_single] + [2*i+1 for i in mask_edges_i_single]
+        mask_edges_j = [2*i for i in mask_edges_j_single] + [2*i+1 for i in mask_edges_j_single]
+
+        x_i = deepcopy(x)
+        for atom_idx in mask_nodes_i:
+            x_i[atom_idx,:] = torch.tensor([len(ATOM_LIST), 0])
+        edge_index_i = torch.zeros((2, 2*(M-num_mask_edges)), dtype=torch.long)
+        edge_attr_i = torch.zeros((2*(M-num_mask_edges), 2), dtype=torch.long)
+        count = 0
+        for bond_idx in range(2*M):
+            if bond_idx not in mask_edges_i:
+                edge_index_i[:,count] = edge_index[:,bond_idx]
+                edge_attr_i[count,:] = edge_attr[bond_idx,:]
+                count += 1
         data_i = Data(x=x_i, edge_index=edge_index_i, edge_attr=edge_attr_i)
-        data_j = Data(x=x_j, edge_index=edge_index_j, edge_attr=edge_attr_j)
-        
-        return data_i, data_j, mol
 
+        x_j = deepcopy(x)
+        for atom_idx in mask_nodes_j:
+            x_j[atom_idx,:] = torch.tensor([len(ATOM_LIST), 0])
+        edge_index_j = torch.zeros((2, 2*(M-num_mask_edges)), dtype=torch.long)
+        edge_attr_j = torch.zeros((2*(M-num_mask_edges), 2), dtype=torch.long)
+        count = 0
+        for bond_idx in range(2*M):
+            if bond_idx not in mask_edges_j:
+                edge_index_j[:,count] = edge_index[:,bond_idx]
+                edge_attr_j[count,:] = edge_attr[bond_idx,:]
+                count += 1
+        data_j = Data(x=x_j, edge_index=edge_index_j, edge_attr=edge_attr_j)
+
+        frag_mols, frag_indices = get_fragments(mol)
+        
+        return data_i, data_j, mol, N, frag_mols, frag_indices
+    
     def __len__(self):
         return len(self.smiles_data)
 
 
 def collate_fn(batch):
-    gis, gjs, mols = zip(*batch)
+    gis, gjs, mols, atom_nums, frag_mols, frag_indices = zip(*batch)
 
-    gis = Batch().from_data_list(gis)
-    gjs = Batch().from_data_list(gjs)
+    frag_mols = [j for i in frag_mols for j in i]
 
-    return gis, gjs, mols
+    # gis = Batch().from_data_list(gis)
+    # gjs = Batch().from_data_list(gjs)
+    gis = Batch.from_data_list(gis)
+    gjs = Batch.from_data_list(gjs)
 
+    gis.motif_batch = torch.zeros(gis.x.size(0), dtype=torch.long)
+    gjs.motif_batch = torch.zeros(gjs.x.size(0), dtype=torch.long)
+
+    curr_indicator = 1
+    curr_num = 0
+    for N, indices in zip(atom_nums, frag_indices):
+        for idx in indices:
+            curr_idx = np.array(list(idx)) + curr_num
+            gis.motif_batch[curr_idx] = curr_indicator
+            gjs.motif_batch[curr_idx] = curr_indicator
+            curr_indicator += 1
+        curr_num += N
+
+    return gis, gjs, mols, frag_mols
+
+
+class MoleculeDatasetWrapper(object):
+    def __init__(self, batch_size, num_workers, valid_size, data_path):
+        super(object, self).__init__()
+        self.data_path = data_path
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.valid_size = valid_size
+
+    def get_data_loaders(self):
+        smiles_data = read_smiles(self.data_path)
+
+        num_train = len(smiles_data)
+        indices = list(range(num_train))
+        np.random.shuffle(indices)
+
+        split = int(np.floor(self.valid_size * num_train))
+        train_idx, valid_idx = indices[split:], indices[:split]
+
+        train_smiles = [smiles_data[i] for i in train_idx]
+        valid_smiles = [smiles_data[i] for i in valid_idx]
+        del smiles_data
+        print(len(train_smiles), len(valid_smiles))
+
+        train_dataset = MoleculeDataset(train_smiles)
+        valid_dataset = MoleculeDataset(valid_smiles)
+
+        train_loader = DataLoader(
+            train_dataset, batch_size=self.batch_size, collate_fn=collate_fn,
+            num_workers=self.num_workers, drop_last=True, shuffle=True
+        )
+        valid_loader = DataLoader(
+            valid_dataset, batch_size=self.batch_size, collate_fn=collate_fn,
+            num_workers=self.num_workers, drop_last=True
+        )
+
+        return train_loader, valid_loader
